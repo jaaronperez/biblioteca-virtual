@@ -1,6 +1,8 @@
 # Proyecto: Biblioteca Virtual Eclesiástica
 
-Resumen de `APP BASE DE DATOS ECLESIASTICA 1.pptx` (9 diapositivas).
+Resumen de `APP BASE DE DATOS ECLESIASTICA 1.pptx` (9 diapositivas). Verificado contra el archivo original el 2026-10-04, incluido el texto de los diagramas de las diapositivas 8 y 9 (criterios de evaluación y pantallas esperadas), que está dentro de objetos SmartArt y no en el texto normal.
+
+Institución: Universidad Tecnológica Metropolitana (su logo aparece en la diapositiva de criterios de evaluación).
 
 ## Objetivo
 
