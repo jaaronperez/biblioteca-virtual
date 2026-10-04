@@ -1,0 +1,21 @@
+# Copiar a ~/.config/biblioteca-virtual/config.toml (fuera del repo).
+# Aquí no van llaves ni contraseñas: Azure usa `az login` y Google usa OAuth.
+
+[google]
+# Hoja de registro - Biblioteca Virtual
+hoja_id = "1LMc2OFPX6j4gObiAsF116mMsYoj-J22lRdkwu-Py_Jw"
+pestana = "Registro"
+# IDs de las carpetas de Drive (la parte final de la URL de la carpeta)
+carpeta_por_subir = ""
+carpeta_subidos = ""
+
+[azure]
+cuenta_storage = "bibliotecadigital"
+contenedor_pdf = "libros-escaneados"
+contenedor_portadas = "portadas"
+cosmos_endpoint = "https://bibliotecavirtual-cosmos.documents.azure.com:443/"
+cosmos_db = "biblioteca"
+
+[local]
+# Carpeta de trabajo: PDF descargados, texto extraído y reportes
+dir_trabajo = "~/biblioteca-trabajo"
