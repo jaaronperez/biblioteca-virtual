@@ -28,6 +28,9 @@ Un documento por libro. Partition key: `/id`.
 | `portada` | Nombre del blob en `portadas` (por ejemplo `LIB-0001.jpg`). |
 | `numPaginas` | Número de páginas del PDF. |
 | `estado` | `subido` (el PDF ya está en Azure), `procesado` (OCR y portada listos) o `error`. |
+| `error` | Solo cuando `estado` es `error`: motivo del fallo, para reintentar con `procesar_libro.py`. Se borra al quedar `procesado`. |
+
+El documento lo crea `subir_lotes.py` con los datos de la hoja de registro al subir el PDF (decidido el 2026-10-04, ver [pipeline.md](pipeline.md)). Si ya existía, conserva los campos que no vienen de la hoja (`capitulos`, `descripcion`).
 
 Ejemplo (valores de relleno):
 
@@ -62,7 +65,7 @@ Un documento por página del libro. Partition key: `/bookId`.
 | `idioma` | Idioma del libro (`es` o `en`), copiado de `libros`. |
 | `textoEs` o `textoEn` | Texto extraído por el OCR. Cada página usa **uno solo** de los dos campos, según su idioma. Son dos campos porque el índice de texto completo de Cosmos define el idioma por ruta (propuesta, verificar al crear la cuenta). |
 | `iglesia`, `tipo`, `anioDesde`, `anioHasta` | Copia de los datos del libro, para filtrar sin cruzar contenedores. |
-| `ocr` | Objeto con `motor`, `idioma` (el modelo que se usó, por ejemplo `spa` o `eng`) y `confianza` de la página, para encontrar las páginas mal leídas. |
+| `ocr` | Objeto con `motor` (`tesseract`, o `pdf-texto` si el texto salió de la capa de texto del PDF), `idioma` (el modelo que se usó, `spa` o `eng`; vacío con `pdf-texto`) y `confianza` de la página (solo con Tesseract), para encontrar las páginas mal leídas. |
 
 Ejemplo (valores de relleno):
 
@@ -153,8 +156,8 @@ Para buscar en los dos idiomas a la vez habría que combinar una consulta por ca
 - [ ] Capítulos: si los libros los tienen y quién los captura. Opción: proponerlos a partir del índice del libro con el OCR, como una etapa posterior que una persona revisa. Lo mismo vale para el `autor`. Se probaría primero con los 5 libros de prueba
 - [ ] `descripcion`: el OCR no la puede extraer del texto. La actividad espera una descripción en la pantalla "Detalles del libro (título, autor, descripción, etc.)" (diapositiva 9). Propuesta: una descripción básica armada con los datos del libro (autor, año, tipo y páginas), para que la pantalla nunca quede vacía, y texto escrito a mano para unos pocos libros destacados. Opciones posteriores: un resumen generado por un modelo de lenguaje y marcado como automático, o metadatos de un catálogo externo para los libros que vienen de Internet Archive
 - [ ] Confirmar que `iglesia` es la denominación. Si luego hace falta la parroquia o el templo, agregar un campo opcional
-- [ ] Cómo llegan los metadatos de la hoja a Cosmos: exportar la hoja y cargarla con un script, o que el script lea la hoja por la API de Sheets. El script debe leer las columnas por el nombre del encabezado, no por la letra, y convertir `Español` e `Inglés` en `es` y `en`
+- [x] ~~Cómo llegan los metadatos de la hoja a Cosmos~~ → 2026-10-04: `subir_lotes.py` lee la hoja por la API de Sheets al subir cada libro, por el nombre del encabezado, y convierte `Español` e `Inglés` en `es` y `en`
 - [ ] Verificar al crear la cuenta de Cosmos (región, suscripción, serverless o nivel gratuito) que la búsqueda de texto completo funcione en español y en inglés. Ya se comprobó que `paginas` acepta las dos rutas de texto en el mismo contenedor (`es-ES` y `en-US`); el español ya se probó con un documento (2026-10-04) y falta probar el inglés. Plan B: un arreglo `palabras` por página con las palabras normalizadas, indexado de forma normal
 - [ ] Búsqueda con dos campos de texto: la API debe elegir `textoEs` o `textoEn` según el idioma de la búsqueda, y para buscar en los dos a la vez combinar ambos con `OR`. Falta probar esa consulta y cómo se ordenan los resultados entre dos campos (con un documento en inglés de prueba)
 - [ ] Libros con los dos idiomas: hoy cada libro tiene un idioma principal. Si hay libros mezclados, decidir con qué modelo del OCR se leen (por ejemplo `spa+eng`) y en qué campo se guarda el texto
-- [ ] Herramienta de OCR y sus valores para el objeto `ocr`
+- [x] ~~Herramienta de OCR y sus valores para el objeto `ocr`~~ → 2026-10-04: Tesseract, o la capa de texto del PDF con PyMuPDF (ver `ocr` arriba)

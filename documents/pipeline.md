@@ -2,7 +2,7 @@
 
 Describe el camino de un libro desde que se escanea hasta que está en Azure. Ver el stack en [stack-tecnologico.md](stack-tecnologico.md) y el avance en [progreso.md](progreso.md).
 
-> Estado: **borrador**. Están confirmados el nombre del PDF, los bloques de IDs por persona y los estados de la hoja de registro. El resto del flujo es una propuesta. El OCR y Cosmos DB siguen pendientes.
+> Estado: **borrador**. Están confirmados el nombre del PDF, los bloques de IDs por persona, los estados de la hoja de registro y el flujo de subida y procesamiento (acordado el 2026-10-04, todavía sin probar). El flujo de quien escanea sigue siendo una propuesta.
 
 ## Reparto y nombres
 
@@ -39,40 +39,172 @@ Estados y quién los cambia:
 6. Actualiza la hoja: páginas, fecha de escaneo y estado `escaneado`.
 7. El PDF se queda en el celular hasta que el libro pase a `verificado`.
 
-## Subida de lotes: `pipeline/subida/subir_lotes.py` (propuesta)
+## Subida y procesamiento: flujo completo (acordado el 2026-10-04)
 
-Lo corre quien sube los lotes, desde su PC. Está en Python (API de Drive, `azure-storage-blob` y `azure-identity`; se autentica en Azure con `az login`). Por ahora la carpeta solo tiene los archivos vacíos.
+Código en [`pipeline/`](../pipeline/): `subir_lotes.py`, `procesar_libro.py` y sus módulos. Preparación y uso en [`pipeline/README.md`](../pipeline/README.md).
 
-1. Se conecta a Azure y a Drive. Si falla, se detiene antes de tocar nada.
-2. Lista `por-subir/` y los blobs que ya existen en `libros-escaneados`.
-3. Por cada archivo valida el nombre y que el PDF abra y tenga páginas.
-4. Si el blob ya existe con el mismo tamaño, solo lo mueve a `subidos/`. Si existe con otro tamaño, lo reporta como conflicto y no lo sobrescribe.
-5. Si no existe, lo descarga a una carpeta temporal fuera del repo, lo sube sin sobrescribir, confirma que existe y pesa lo mismo, y lo mueve de `por-subir/` a `subidos/`.
-6. Imprime y guarda un reporte: subidos, ya existentes, rechazados, conflictos y errores.
-7. Al terminar, dispara el OCR para los libros recién subidos (opción `--sin-ocr` para desactivarlo). Hasta que el OCR y Cosmos estén definidos, este paso queda apagado.
+Un solo script, `subir_lotes.py`, corre en la PC de quien sube los lotes. Recibe los PDF de `por-subir/`, los sube a Blob, extrae el texto **en la PC** y guarda todo en Cosmos. No hay disparador en la nube: no se usan Event Grid ni Azure Functions, ni se gasta crédito en CPU. Un segundo script, `procesar_libro.py`, repite solo la extracción y Cosmos para un libro ya subido. Sirve para reintentar los libros en `error` o para reprocesarlos.
 
-Garantías: nunca sobrescribe un blob, no mueve un archivo sin confirmar antes que está en Blob, correrlo dos veces no duplica nada, un archivo con error no frena a los demás, nunca borra nada en Drive y no imprime secretos. Opciones previstas: `--dry-run` y `--limit N`. El PDF local se conserva hasta que el OCR termine bien.
+Principios:
 
-## Procesamiento de un libro: `pipeline/ocr/procesar_libro.py` (propuesta)
+- **Primero se sube y después se extrae el texto.** Si la extracción falla, el PDF ya está a salvo en Azure y solo se repite la extracción.
+- **Los duplicados se comprueban antes de descargar y de extraer**, comparando el MD5 que da Drive con el del blob. Así no se gasta tiempo en un libro que ya está.
+- **Un archivo solo se mueve a `subidos/` después de confirmar que está en Blob.**
+- **Cosmos se actualiza al final.** El libro pasa a `procesado` solo cuando ya tiene páginas y portada.
+- **El script crea el registro del libro en `libros`** con los datos de la hoja de registro, en el momento de subirlo. Así el texto nunca llega antes que el libro.
 
-Lo llama `subir_lotes.py` al terminar la subida, o se corre a mano con el ID del libro. Todavía no existe. Cosmos DB no dispara nada por sí solo: el propio script escribe las páginas.
+### Vista general
 
-1. Recibe el ID (por ejemplo `LIB-0770`) y lee el documento del libro en `libros`, por su `id`, para saber el idioma y copiar iglesia, tipo y años. Si el documento no existe, se detiene y lo reporta.
-2. Abre el PDF (la copia local o una descarga de Blob) y lo separa en páginas.
-3. Por cada página, extrae el texto con el OCR en el idioma del libro (`spa` o `eng`) y arma el documento de `paginas`: `id` `LIB-0770-p0001`, `bookId`, `numero`, `idioma`, `textoEs` o `textoEn`, los filtros copiados y el objeto `ocr`.
-4. Escribe las páginas en Cosmos con upsert, en lotes de hasta 100 operaciones (todas comparten la partición `bookId`, así que cada lote es atómico; verificar el límite). Repetir el proceso no duplica nada, porque el `id` es determinista.
-5. Si el libro tiene ahora menos páginas que antes (reescaneo), borra las páginas sobrantes.
-6. Genera la miniatura de la página 1 y la sube a `portadas`.
-7. Solo al final actualiza `libros`: `numPaginas`, `portada` y `estado` en `procesado`. Si algo falla, el `estado` queda en `error` y el motivo se registra.
+```mermaid
+flowchart LR
+    H["Hoja de registro<br/>Google Sheets"]
+    D["Drive<br/>por-subir/ → subidos/"]
+    subgraph PC["PC de quien sube los lotes"]
+        S["subir_lotes.py"]
+        T["Carpeta de trabajo<br/>~/biblioteca-trabajo/"]
+        O["Extracción de texto<br/>PyMuPDF + Tesseract"]
+    end
+    B1[("Blob<br/>libros-escaneados")]
+    B2[("Blob<br/>portadas")]
+    C[("Cosmos DB<br/>libros + paginas")]
 
-Depende de que el registro del libro ya exista en `libros`, y hoy nadie lo crea (ver Pendiente por definir).
+    H -- "metadatos y estado" --> S
+    S -- "marca subido" --> H
+    D -- "descarga el PDF" --> S
+    S -- "mueve a subidos/" --> D
+    S <--> T
+    T <--> O
+    S -- "PDF" --> B1
+    S -- "miniatura" --> B2
+    S -- "libro y páginas" --> C
+```
+
+### Flujo de cada libro
+
+```mermaid
+flowchart TD
+    A(["PDF en por-subir/"]) --> V1{"¿Nombre válido?<br/>LIB-0000.pdf"}
+    V1 -- no --> R1["Rechazado"]
+    V1 -- sí --> V2{"¿Fila en la hoja en escaneado, subido o verificado,<br/>con título, iglesia, tipo e idioma?"}
+    V2 -- no --> R2["Rechazado"]
+    V2 -- sí --> V3{"¿Ya está en el blob?<br/>MD5 de Drive vs. MD5 del blob"}
+    V3 -- "sí, otro MD5" --> X["Conflicto: no se toca nada"]
+    V3 -- "sí, mismo MD5 y libro procesado" --> M0["Mover a subidos/"] --> Y["Ya existente"]
+    V3 -- "sí, mismo MD5 y libro no procesado" --> E
+    V3 -- no --> E["Descargar a la carpeta de trabajo<br/>y comprobar el MD5"]
+    E --> V4{"¿El PDF abre<br/>y tiene páginas?"}
+    V4 -- no --> R3["Rechazado"]
+    V4 -- sí --> V5{"¿Hay que subirlo?"}
+    V5 -- sí --> U["Subir a libros-escaneados sin sobrescribir<br/>y confirmar que el MD5 coincide"]
+    U --> L1
+    V5 -- no --> L1["Cosmos libros: datos de la hoja<br/>estado = subido"]
+    L1 --> MV["Mover a subidos/<br/>y marcar subido en la hoja"]
+    MV --> X1
+    subgraph P["procesar_libro.py (también se corre solo, con el ID)"]
+        X1["Extraer el texto página por página<br/>→ paginas.jsonl y portada .jpg"]
+        X1 --> PT["Subir la portada a portadas"]
+        PT --> PG["Cosmos paginas: upsert por lotes<br/>y borrar las páginas sobrantes"]
+        PG --> L2["Cosmos libros: numPaginas, portada<br/>estado = procesado"]
+        L2 --> LM["Borrar la carpeta de trabajo del libro"]
+    end
+    LM --> Z(["Procesado"])
+    X1 -. "si falla" .-> ER["Cosmos libros: estado = error y motivo<br/>se conserva la carpeta de trabajo"]
+    PT -. "si falla" .-> ER
+    PG -. "si falla" .-> ER
+```
+
+### Paso a paso
+
+**0. Preparación (una vez por corrida).** Se conecta a Drive, a la hoja, a Blob y a Cosmos. Si alguna conexión falla, se detiene antes de tocar nada. Lee de una sola vez la lista de `por-subir/` (con el `md5Checksum` que da Drive), la pestaña `Registro` de la hoja (las columnas se leen por el nombre del encabezado, no por la letra), los blobs de `libros-escaneados` con su MD5 y el `estado` de los libros que ya están en Cosmos.
+
+**1. Validar el nombre.** Debe cumplir `^LIB-\d{4}\.pdf$`. Si no, el archivo se rechaza y no se descarga.
+
+**2. Validar la fila de la hoja.** Debe existir, estar en `escaneado` (o en `subido` o `verificado`, si el archivo se vuelve a poner en `por-subir/`) y tener título, iglesia, tipo e idioma. `Español` se convierte en `es` y `Inglés` en `en`. Si no se cumple, el libro se rechaza con el motivo.
+
+**3. Comprobar duplicados.** No hace falta descargar nada:
+
+| Situación | Qué hace | Resultado en el reporte |
+|---|---|---|
+| No está en el blob | Flujo completo | `subido` |
+| Está, con el mismo MD5, y el libro está `procesado` en Cosmos | Solo lo mueve a `subidos/` | `ya existente` |
+| Está, con el mismo MD5, y el libro **no** está procesado | Se salta la subida y sigue con Cosmos y la extracción (retoma un intento que falló) | `retomado` |
+| Está, con **otro** MD5 | No sube, no mueve y no toca Cosmos | `conflicto` |
+
+**4. Descargar y validar el PDF.** Se descarga a `~/biblioteca-trabajo/LIB-0770/LIB-0770.pdf` y se comprueba que el MD5 coincide con el de Drive. Después se comprueba con PyMuPDF que el PDF abre y tiene páginas. Si el número de páginas no coincide con la columna `Páginas` de la hoja, se anota como **advertencia** y el libro no se detiene.
+
+**5. Subir a Blob.** Se sube con `overwrite=False`: si el blob apareció mientras tanto, Azure rechaza la subida en vez de sobrescribir. Se guarda el MD5 en `Content-MD5`, porque el SDK no lo pone solo en las subidas por partes. Después se lee el blob y se confirma que existe y que su MD5 coincide.
+
+**6. Registro del libro en Cosmos.** Hace un upsert en `libros` con los datos de la hoja: título, autor, iglesia, tipo, idioma, fecha y años. También guarda `pdf` y `estado = subido`. Si el documento ya existía, conserva los campos que no vienen de la hoja, como `capitulos` y `descripcion`. Va antes de mover el archivo: si falla, el archivo sigue en `por-subir/` y la siguiente corrida lo retoma.
+
+**7. Mover y marcar.** Mueve el archivo de `por-subir/` a `subidos/` en Drive y pone el estado `subido` en la hoja. Nunca borra nada en Drive. Si falla solo la escritura en la hoja, el libro sigue adelante y se anota una advertencia.
+
+**8. Extraer el texto (`procesar_libro.py`).** Página por página:
+
+- Si la página ya trae una capa de texto, como los PDF de Internet Archive, el texto se toma directo con PyMuPDF (`ocr.motor = "pdf-texto"`). Se considera que tiene capa si trae al menos 20 caracteres que no sean espacios.
+- Si no, la página se convierte en imagen a 300 dpi y pasa por Tesseract con `spa` o `eng` según el idioma del libro (`ocr.motor = "tesseract"`, con la confianza media de la página).
+- Cada página se agrega como una línea a `paginas.jsonl` apenas termina. Si el script se cae, al volver a correrlo continúa desde la última página guardada, siempre que el MD5 del PDF sea el mismo.
+- De la página 1 sale la miniatura `LIB-0770.jpg`, en JPEG de 500 px de ancho.
+- La opción `--forzar-ocr` ignora la capa de texto y pasa todas las páginas por Tesseract.
+
+Carpeta de trabajo de cada libro, fuera del repo:
+
+```
+~/biblioteca-trabajo/
+├── LIB-0770/
+│   ├── LIB-0770.pdf      ← PDF descargado de Drive (o de Blob, si se reprocesa)
+│   ├── meta.json         ← MD5 del PDF, número de páginas e idioma, para saber si se puede retomar
+│   ├── paginas.jsonl     ← una línea por página, con el documento listo para Cosmos
+│   └── LIB-0770.jpg      ← miniatura de la portada
+└── reportes/
+    └── 2026-10-04_1830.csv
+```
+
+**9. Subir la portada** a `portadas`. Aquí sí se sobrescribe, porque la portada se genera a partir del PDF.
+
+**10. Guardar las páginas en Cosmos.** Hace upsert de las líneas de `paginas.jsonl` en `paginas`, en lotes transaccionales de 25 operaciones de la misma partición `bookId`. Cosmos permite hasta 100 por lote, pero cada página cuesta unos 13 RU o más, y un lote de 100 pide más que los 1000 RU/s de la base (en la primera corrida real dio errores 429). Cada página lleva copiados `iglesia`, `tipo`, `anioDesde` y `anioHasta`. Después borra las páginas cuyo `numero` sea mayor que el total actual (por si fue un reescaneo). El SDK reintenta los errores 429 por exceso de RU durante un máximo de 5 minutos (por defecto se rinde a los 30 segundos).
+
+**11. Cerrar el libro.** Actualiza `libros` con `numPaginas`, `portada` y `estado = procesado`, y borra el campo `error` si existía.
+
+**12. Limpiar.** Borra la carpeta de trabajo del libro. Si cualquier paso del 8 al 11 falló, el libro queda en `estado = error` con el motivo en el campo `error`, la carpeta se conserva y el script sigue con el siguiente libro.
+
+**Al final de la corrida** imprime y guarda un reporte CSV con una fila por archivo: ID, resultado (`procesado`, `ya existente`, `retomado`, `conflicto`, `rechazado` o `error`), motivo, advertencias, páginas y método de extracción.
+
+### Opciones previstas
+
+| Opción | Qué hace |
+|---|---|
+| `--dry-run` | Hace las validaciones y la comprobación de duplicados, y muestra lo que haría, sin descargar, subir, mover ni escribir |
+| `--limit N` | Procesa como máximo N libros |
+| `--solo LIB-0001,LIB-0002` | Procesa solo esos IDs |
+| `--workers N` | Libros en paralelo, uno por proceso (por defecto 4; la PC de pruebas tiene 16 núcleos) |
+| `--forzar-ocr` | Pasa todas las páginas por Tesseract aunque tengan capa de texto |
+| `--sin-texto` | Solo sube, mueve y registra el libro en `estado = subido`; la extracción se hace después con `procesar_libro.py` |
+
+`procesar_libro.py LIB-0770 [--forzar-ocr]` corre los pasos 8 a 12 para un libro que ya está en Blob. Si no hay copia local, descarga el PDF de Blob.
+
+### Garantías
+
+- Nunca sobrescribe un PDF en Blob.
+- No mueve un archivo en Drive sin confirmar antes que está en Blob, y nunca borra nada en Drive.
+- Correrlo dos veces no duplica nada: los IDs son fijos y Cosmos usa upsert.
+- Un libro con error no frena a los demás.
+- No imprime llaves ni tokens. En Azure se autentica con `az login` (`DefaultAzureCredential`); en Google, con un token OAuth guardado fuera del repo.
+
+### Requisitos para probarlo
+
+- [x] Tesseract con español e inglés en la PC (5.5.3, instalado el 2026-10-04).
+- [x] Rol de datos de Cosmos para el usuario (`Cosmos DB Built-in Data Contributor`), asignado el 2026-10-04 y verificado con una lectura desde el script.
+- [x] Proyecto de Google Cloud con las API de Drive y de Sheets activadas y un cliente OAuth de escritorio. `credentials.json` está en `~/.config/biblioteca-virtual/` desde el 2026-10-04; `token.json` se crea en la primera autorización.
+- [x] Carpetas `por-subir/` y `subidos/` en Drive, dentro de `biblioteca virtual`, con los 5 PDF de prueba en `por-subir/` (2026-10-04).
 
 ## Pendiente por definir
 
 - [ ] App de escaneo del celular (probar con un libro piloto: ajustes, nombre del archivo exportado y límite de páginas por documento)
 - [ ] Servicio de la carpeta compartida (Drive u OneDrive) y permisos para que quien sube pueda mover los archivos de los demás
 - [ ] Quién sube los lotes a Azure
-- [ ] Alcance de la primera versión del script: modo de reemplazos, validación con `pypdf` y marcado automático de `subido` en la hoja
-- [ ] Quién crea el registro de cada libro en Cosmos DB. Hoy nadie: la actividad solo describe la subida y el OCR. Propuesta: un script aparte (por ejemplo `cargar_libros.py`) que lee la hoja, valida los datos y crea o actualiza el documento del libro, antes de que corra el OCR
+- [ ] Modo de reemplazos: cómo se sube un libro reescaneado cuando el blob ya existe con otro MD5. Hoy se reporta como conflicto y no se toca
+- [x] ~~Alcance de la primera versión del script~~ → 2026-10-04: valida con PyMuPDF, marca `subido` en la hoja y crea el libro en Cosmos. Ver "Subida y procesamiento"
+- [x] ~~Quién crea el registro de cada libro en Cosmos DB~~ → 2026-10-04: `subir_lotes.py`, con los datos de la hoja, al subir el PDF (paso 7)
 - [ ] Revisar las listas de `Tipo` e `Iglesia` después de los primeros 100 libros (cuántos cayeron en `Otro`)
-- [ ] OCR, dónde corre y cómo se dispara (ver `stack-tecnologico.md`)
+- [x] ~~OCR, dónde corre y cómo se dispara~~ → 2026-10-04: en la PC de quien sube, dentro del mismo script, sin disparador en la nube
+- [ ] Medir con el libro piloto el tiempo de extracción por página y la calidad de Tesseract frente a la capa de texto de Internet Archive

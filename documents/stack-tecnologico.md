@@ -64,14 +64,25 @@ El detalle está en [modelo-datos.md](modelo-datos.md). En resumen:
 - Suscripción: **Azure for Students**. Tiene un crédito limitado y algunos servicios o regiones pueden estar restringidos. Antes de crear Cosmos DB, confirmar que la suscripción permita serverless o free tier.
 - Usar **serverless** o **free tier** (1000 RU/s y 25 GB gratis). Son excluyentes entre sí: se elige uno al crear la cuenta. Verificado el 2026-10-04: el nivel gratuito da 1000 RU/s y 25 GB de por vida en la cuenta, se permite una sola cuenta con nivel gratuito por suscripción, hay que activarlo al crearla y no se puede cambiar después. El proveedor `Microsoft.DocumentDB` ya está registrado y la cuenta con nivel gratuito ya se creó (ver "Recursos creados en Azure").
 - Estimación: 3000 libros × ~300 páginas ≈ 900 mil documentos. Verificar el consumo de RU en las pruebas de carga (Fase 4).
+- Medido el 2026-10-04: reescribir con upsert una página existente (de 1 a 1.8 KB, con texto completo) cuesta 12.95 RU, y contar las páginas de un libro cuesta 2.99 RU. Con 1000 RU/s, escribir 900 mil páginas toma unas 3.5 horas de escritura como mínimo. Es una cota optimista: crear una página nueva probablemente cuesta más que reescribirla.
 - El peso de los PDF puede ser grande (cientos de GB para 3000 libros, estimación sin medir). Medirlo y fijar un tamaño máximo por libro antes de escanear en masa.
 
 ## Flujo previsto
 
-1. Se sube el PDF a `libros-escaneados` con el nombre `LIB-0001.pdf` (subida en lote).
-2. Se dispara el pipeline (disparador por definir): corre el OCR (herramienta por definir) y genera la miniatura de la página 1 en `portadas`.
+1. `subir_lotes.py` sube el PDF a `libros-escaneados` con el nombre `LIB-0001.pdf` (subida en lote, sin duplicados) y crea el libro en Cosmos con los datos de la hoja.
+2. El mismo script, en la PC de quien sube, extrae el texto y genera la miniatura de la página 1 en `portadas`. No hay disparador en la nube.
 3. El texto extraído se guarda en **Cosmos DB**, indexado.
 4. La API consulta Cosmos DB y devuelve resultados con la URL de la portada y una SAS temporal para el PDF.
+
+El detalle está en [pipeline.md](pipeline.md).
+
+## Decisión: OCR y disparador (2026-10-04)
+
+- **Dónde corre:** en la PC de quien sube los lotes, dentro de `subir_lotes.py`. Para reintentos se usa `procesar_libro.py`.
+- **Herramientas:** si la página ya trae capa de texto (por ejemplo, los PDF de Internet Archive), el texto se toma directo con **PyMuPDF**. Si no, se usa **Tesseract** con `spa` o `eng`. PyMuPDF también genera la miniatura.
+- **Por qué:** extraer el texto de unas 900 mil páginas en la nube costaría, según una estimación sin medir, unos 50 a 70 USD del crédito de Azure for Students. En la PC no cuesta nada, y el flujo queda con menos servicios.
+- **Descartados por ahora:** Azure Functions, porque Tesseract es un binario del sistema que no se puede instalar en Flex Consumption y Consumption corta a los 10 minutos. También Event Grid con una cola y un Container Apps Job. Esta última opción queda como camino si se pide procesamiento en la nube: el mismo `procesar_libro.py` se empaquetaría en un contenedor.
+- **Riesgo:** el criterio de "Arquitectura NoSQL y nube" vale 40%, y con esta decisión el procesamiento no ocurre en la nube.
 
 ## App móvil: Expo
 
@@ -89,15 +100,15 @@ El flujo completo está en [pipeline.md](pipeline.md). Las herramientas:
 
 - **Hoja de registro:** Google Sheets, con los 3000 IDs, los bloques por persona y el avance. Está en el Drive del usuario.
 - **Carpeta compartida de escaneo:** Google Drive, con `por-subir/` y `subidos/`. Aún no se crean y falta confirmar el servicio.
-- **Script de subida:** Python, en `pipeline/subida/subir_lotes.py` (hoy vacío). Usaría la API de Drive y `azure-storage-blob` con `azure-identity`; se autentica en Azure con `az login`, sin llaves.
+- **Scripts de subida y procesamiento:** Python 3.14, en `pipeline/` (`subir_lotes.py` y `procesar_libro.py`, escritos el 2026-10-04 y todavía sin probar de punta a punta). Usan las API de Drive y de Sheets (OAuth de escritorio), `azure-storage-blob`, `azure-cosmos`, `azure-identity`, PyMuPDF y Tesseract (`pytesseract`); las versiones están fijadas en `pipeline/requirements.txt`. Se autentican en Azure con `az login`, sin llaves; en Cosmos usan el rol de datos `Cosmos DB Built-in Data Contributor` (asignado el 2026-10-04). La configuración y las credenciales de Google viven en `~/.config/biblioteca-virtual/`, fuera del repo.
 - **App de escaneo del celular:** por definir. Microsoft Lens fue retirada, así que no es opción.
 - **Conectores de Claude:** el de Google Drive crea, busca, lee y comparte archivos, y el de Google Sheets (conectado el 2026-10-04) lee y edita celdas, formatos y pestañas de la hoja de registro desde las sesiones de trabajo. Editar la hoja desde el script de subida es aparte: requeriría la API de Sheets con credenciales de Google, que se guardarían fuera del repo (el `.gitignore` aún no ignora `credentials.json` ni `token.json`).
 
 ## Pendiente por definir
 
-- [ ] OCR (herramienta o servicio; Azure AI Document Intelligence queda descartado). Los libros son impresos, así que no hace falta reconocimiento de escritura a mano. Los idiomas son español e inglés
+- [x] ~~OCR~~ → 2026-10-04: Tesseract y PyMuPDF en la PC de quien sube (ver "Decisión: OCR y disparador"). Falta medirlo con el libro piloto
 - [ ] Backend (lenguaje, framework, hosting de la API)
-- [ ] Disparador del pipeline (por ejemplo Azure Functions)
+- [x] ~~Disparador del pipeline~~ → 2026-10-04: no hay disparador en la nube; el OCR lo corre el propio script de subida
 - [ ] App de escaneo del celular (probar con un libro piloto)
 - [x] App móvil: Expo, SDK 57 (ver arriba)
 - [ ] Autenticación
