@@ -2,7 +2,7 @@
 
 Define las tecnologías del proyecto Biblioteca Virtual Eclesiástica. Ver contexto y cronograma en [contexto-proyecto.md](contexto-proyecto.md).
 
-> Estado: **provisional**. Por ahora están definidas la parte de Azure, la estructura del almacenamiento y la app móvil (Expo). El backend está pendiente.
+> Estado: **provisional**. Están definidas la parte de Azure, la estructura del almacenamiento, la app móvil (Expo) y el backend (FastAPI). Falta el hosting de la API.
 
 ## Nube: Microsoft Azure
 
@@ -84,6 +84,18 @@ El detalle está en [pipeline.md](pipeline.md).
 - **Descartados por ahora:** Azure Functions, porque Tesseract es un binario del sistema que no se puede instalar en Flex Consumption y Consumption corta a los 10 minutos. También Event Grid con una cola y un Container Apps Job. Esta última opción queda como camino si se pide procesamiento en la nube: el mismo `procesar_libro.py` se empaquetaría en un contenedor.
 - **Riesgo:** el criterio de "Arquitectura NoSQL y nube" vale 40%, y con esta decisión el procesamiento no ocurre en la nube.
 
+## Backend: FastAPI (2026-11-16)
+
+**Decidido:** la API es Python 3.14 con **FastAPI** y `uvicorn`, en `backend/`. Preparación, endpoints y uso en [`backend/README.md`](../backend/README.md).
+
+- **Por qué:** reutiliza el lenguaje y los SDK de Azure del pipeline, y genera sola la página `/docs` para probar los endpoints en la demostración.
+- **Conexión:** un solo `CosmosClient` y un solo `BlobServiceClient` por proceso (patrón Singleton en `app/db.py`). Al arrancar hace una prueba de conexión y, si falla, no arranca.
+- **Configuración:** variables de entorno en `backend/.env` (ignorado por git; plantilla en `.env.example`). Se autentica con `az login`, sin llaves; `COSMOS_KEY` es opcional.
+- **Solo lectura:** la API consulta `libros` y `paginas`, arma la URL pública de la portada y firma una SAS de delegación de usuario de 15 minutos para el PDF. No escribe en Azure.
+- **Para la app (2026-11-17):** paginación con `limite`, `desde` y `hayMas` también en `/buscar`; `/filtros` con los valores existentes; `/admin/progreso` con el avance por integrante, que sale de `libros` en Cosmos y de la variable `EQUIPO` (los bloques de IDs de la hoja); y `/salud` devuelve el identificador del cliente único de Cosmos, para demostrar el Singleton.
+- **Versiones:** fijadas en `backend/requirements.txt` (`fastapi==0.163.1`, `uvicorn==0.54.0`).
+- **Pendiente:** hosting (hoy corre solo en local), autenticación de usuarios y restringir CORS, que hoy acepta cualquier origen para lecturas.
+
 ## App móvil: Expo
 
 **Decidido:** la app móvil se desarrolla con **Expo**, en su última versión estable: **SDK 57** (`expo@57.0.26`, etiqueta `latest` de npm verificada el 2026-10-03).
@@ -93,6 +105,10 @@ El detalle está en [pipeline.md](pipeline.md).
 - **Gestor de paquetes:** npm (`package-lock.json` versionado). No mezclar con yarn ni pnpm.
 - **Node:** 24, fijado en `mobile/.nvmrc` (el equipo usa `nvm use`). Pendiente confirmar que el SDK 57 lo soporta.
 - **`.gitignore`:** uno en la raíz (secretos, libros y PDF, Azure, editores) y otro en `mobile/` (reglas de Expo, generado por la plantilla).
+- **Librerías agregadas (2026-11-17):** TanStack Query (`@tanstack/react-query`) para las llamadas a la API, con caché, reintentos y paginación; AsyncStorage para guardar los ajustes en el dispositivo; `expo-image` para cachear las portadas y `expo-web-browser` para abrir el PDF con su enlace temporal. Estilos con `StyleSheet`, sin librería de UI. ESLint con `eslint-config-expo`, instalado por `npx expo lint`.
+- **Navegación:** barra inferior con JavaScript tabs de expo-router (`expo-router/js-tabs`), no con las native tabs de la plantilla, para que la barra se vea igual en Android, iOS y web.
+- **Visor de PDF:** se abre en el navegador del sistema; dentro de la app se lee el texto indexado página por página. No se usa un visor de PDF nativo, que exigiría un development build en lugar de Expo Go.
+- **Conexión con la API:** por defecto, la misma computadora que corre `expo start`, en el puerto 8000; se cambia en Ajustes o con `EXPO_PUBLIC_API_URL`. Detalle en [`mobile/README.md`](../mobile/README.md).
 
 ## Escaneo y subida de libros
 
@@ -107,7 +123,7 @@ El flujo completo está en [pipeline.md](pipeline.md). Las herramientas:
 ## Pendiente por definir
 
 - [x] ~~OCR~~ → 2026-10-04: Tesseract y PyMuPDF en la PC de quien sube (ver "Decisión: OCR y disparador"). Falta medirlo con el libro piloto
-- [ ] Backend (lenguaje, framework, hosting de la API)
+- [ ] Backend: ~~lenguaje y framework~~ (2026-11-16: Python con FastAPI, ver arriba). Falta el hosting de la API
 - [x] ~~Disparador del pipeline~~ → 2026-10-04: no hay disparador en la nube; el OCR lo corre el propio script de subida
 - [ ] App de escaneo del celular (probar con un libro piloto)
 - [x] App móvil: Expo, SDK 57 (ver arriba)

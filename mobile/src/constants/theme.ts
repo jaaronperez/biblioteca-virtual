@@ -1,6 +1,6 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Colores, tipografías y medidas de la app. Hay un juego de colores para el modo
+ * claro y otro para el oscuro; `useTheme()` devuelve el que corresponde.
  */
 
 import '@/global.css';
@@ -9,18 +9,32 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: '#1F1A17',
+    textSecondary: '#6B625B',
+    background: '#FAF7F2',
+    backgroundElement: '#F0EBE3',
+    backgroundSelected: '#E3DBCF',
+    border: '#DDD4C7',
+    tint: '#7A2E2E',
+    onTint: '#FFFFFF',
+    success: '#2F6B4F',
+    warning: '#9A6A12',
+    danger: '#A3312B',
+    highlight: '#F6DE8D',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: '#F2EDE6',
+    textSecondary: '#ADA39A',
+    background: '#151210',
+    backgroundElement: '#221E1B',
+    backgroundSelected: '#332D28',
+    border: '#3A332D',
+    tint: '#E3A589',
+    onTint: '#1F1A17',
+    success: '#7CC4A0',
+    warning: '#E0B45C',
+    danger: '#F08A80',
+    highlight: '#6B5718',
   },
 } as const;
 
@@ -61,5 +75,9 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+export const Radius = { small: 8, medium: 12, large: 20 } as const;
+
+/** Ancho máximo del contenido en pantallas grandes (tabletas y web). */
+export const MaxContentWidth = 960;
+/** Ancho máximo de la columna de lectura, para que las líneas no queden muy largas. */
+export const MaxReadingWidth = 680;

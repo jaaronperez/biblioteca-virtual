@@ -1,56 +1,53 @@
-# Welcome to your Expo app 👋
+# App móvil: Biblioteca Virtual Eclesiástica
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+App en Expo (SDK 57, expo-router, TypeScript) que consume la [API del backend](../backend/README.md). Corre en Android, iOS y en el navegador con el mismo código.
 
-## Get started
+## Pantallas
 
-1. Install dependencies
+| Ruta | Archivo | Qué hace |
+|---|---|---|
+| Inicio | `src/app/(tabs)/index.tsx` | Portadas de los libros, accesos por tipo y resumen del avance |
+| Biblioteca | `src/app/(tabs)/biblioteca.tsx` | Buscador: por metadatos (modo «Libros») o dentro del texto de las páginas (modo «En el texto»), con filtros combinables de iglesia, tipo, idioma y años. Resultados paginados al desplazar |
+| Ajustes | `src/app/(tabs)/ajustes.tsx` | Tamaño de letra del lector, dirección de la API, estado de la conexión y acceso al panel |
+| Detalle | `src/app/libro/[id].tsx` | Portada, descripción, ficha, buscar dentro del libro, leer el texto o abrir el PDF (enlace temporal) |
+| Lector | `src/app/lector/[id].tsx` | Texto indexado página por página, con las palabras buscadas resaltadas y la página siguiente precargada |
+| Panel | `src/app/admin.tsx` | Avance por integrante frente a su meta (se actualiza cada 15 s) y prueba de 20 peticiones concurrentes |
 
-   ```bash
-   npm install
+La barra inferior (Inicio, Biblioteca, Ajustes) está en `src/app/(tabs)/_layout.tsx`.
+
+## Cómo consume la API
+
+- `src/lib/api.ts`: todas las rutas de la API y una sola función `pedir`, que corta a los 15 s y convierte cualquier fallo (sin red, tiempo agotado, Azure caído = 502, 404, 422) en un `ErrorApi` con un mensaje para el usuario.
+- `src/lib/consultas.ts`: hooks de TanStack Query. Caché compartida, dos reintentos con espera creciente ante fallos pasajeros y paginación con `useInfiniteQuery` (`limite` y `desde`; la API responde `hayMas`).
+- `src/components/estados.tsx` y `src/components/aviso-conexion.tsx`: cada pantalla muestra cargando, error con «Reintentar» o vacío. Si la API deja de responder, aparece una franja roja arriba que desaparece sola al volver la conexión; lo ya cargado sigue visible.
+
+## Correrla
+
+1. Arranca la API, abierta a la red local para que el teléfono la alcance:
+
+   ```powershell
+   cd backend
+   .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
 
-2. Start the app
+   La primera vez Windows puede pedir permiso en el firewall para Python: acéptalo en redes privadas.
 
-   ```bash
+2. Arranca la app:
+
+   ```powershell
+   cd mobile
+   npm install
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+   - **Teléfono:** abre Expo Go y escanea el QR. El teléfono y la PC deben estar en la misma red Wi‑Fi.
+   - **Navegador:** presiona `w`.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+La app busca la API en la misma computadora que corre `expo start`, en el puerto 8000. Para usar otra dirección, escríbela en **Ajustes → Conexión con el servidor**, o crea `mobile/.env` con `EXPO_PUBLIC_API_URL=http://<ip>:8000` (ver `.env.example`).
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Comprobaciones
 
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+npx tsc --noEmit   # tipos
+npx expo lint      # lint
 ```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.

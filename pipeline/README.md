@@ -28,6 +28,16 @@ Sube los PDF de `por-subir/` (Drive) a Blob Storage, extrae el texto de cada pá
    sudo apt install tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng         # Ubuntu/Debian
    ```
 
+   En Windows (PowerShell), con `uv` y `winget`:
+
+   ```powershell
+   uv venv pipeline\.venv --python 3.14
+   uv pip install --python pipeline\.venv\Scripts\python.exe -r pipeline\requirements.txt
+   winget install --id tesseract-ocr.tesseract -e --interactive
+   ```
+
+   El instalador de Windows solo trae inglés si no se marca *Additional language data → Spanish*, y no agrega Tesseract al PATH. Hay que agregar `C:\Program Files\Tesseract-OCR` al PATH. Si falta el español, se puede copiar `tessdata` a una carpeta propia, agregarle `spa.traineddata` (de `tesseract-ocr/tessdata_fast`) y apuntar ahí la variable `TESSDATA_PREFIX`. Los scripts se corren con `.venv\Scripts\python.exe`.
+
 3. **Azure:** `az login`. La cuenta necesita los roles `Storage Blob Data Contributor` en la cuenta de almacenamiento y `Cosmos DB Built-in Data Contributor` en Cosmos. No se usan llaves.
 
 4. **Google:** un cliente OAuth de escritorio.

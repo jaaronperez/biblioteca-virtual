@@ -149,6 +149,8 @@ WHERE c.idioma = "es"
 ORDER BY RANK FullTextScore(c.textoEs, "bautismo")
 ```
 
+La API (`backend/app/consultas.py`) usa `FullTextContainsAll` y `ORDER BY RANK FullTextScore` con los términos como parámetros; probado el 2026-11-16 en español, en todas las particiones y dentro de un libro. Para buscar dentro del arreglo `capitulos` de `libros` usa `EXISTS(SELECT VALUE cap FROM cap IN c.capitulos WHERE CONTAINS(cap.titulo, @capitulo, true))`, que corre pero aún no tiene datos con qué probarse.
+
 Para buscar en los dos idiomas a la vez habría que combinar una consulta por campo, y no se ha probado cómo se ordena el resultado. La búsqueda avanzada recorre varias particiones, y su costo en RU se mide en las pruebas de carga de la Fase 4. Para tolerar los errores del OCR, `FullTextContains` acepta búsqueda aproximada con una distancia de hasta 2 ediciones, por ejemplo `FullTextContains(c.textoEs, {"term": "bautismo", "distance": 1})`.
 
 ## Pendiente por definir
